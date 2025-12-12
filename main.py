@@ -1,403 +1,418 @@
 import streamlit as st
 import json
-import os
+from pathlib import Path
 from datetime import datetime
-import pandas as pd
 
-# Configuração da página
-st.set_page_config(
-    page_title="Controle de Pizzas",
-    page_icon="🍕",
-    layout="wide"
-)
+st.set_page_config(page_title="Controle de Estoque - Pizzaria", page_icon="🍕", layout="wide")
 
-# Arquivo para armazenar os dados
-DATA_FILE = "pizzas_data.json"
+# Arquivo para salvar os dados
+DATA_FILE = Path("./estoque_pizzas.json")
 
-# Sabores fixos disponíveis
-SABORES_DISPONIVEIS = ["Calabresa", "Mussarela", "Frango", "Americana"]
-
-# Dias da semana disponíveis
+# Dias da semana
 DIAS_SEMANA = ["Segunda-Feira", "Terça-Feira", "Quarta-Feira"]
 
+# Sabores FIXOS
+SABORES = ["Calabresa", "Mussarela", "Frango", "Americana"]
+
+# Inicializar session state
+if 'pedidos' not in st.session_state:
+    st.session_state.pedidos = {}  # {sabor: {dia: quantidade_pedida}}
+if 'retiradas' not in st.session_state:
+    st.session_state.retiradas = []  # Lista de todas as retiradas
+
 # Função para carregar dados
-def load_data():
-    if os.path.exists(DATA_FILE):
+def carregar_dados():
+    if DATA_FILE.exists():
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return []
+            dados = json.load(f)
+            st.session_state.pedidos = dados.get('pedidos', {})
+            st.session_state.retiradas = dados.get('retiradas', [])
 
 # Função para salvar dados
-def save_data(data):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-# Função para adicionar retirada
-def add_retirada(dia, nome, sabores_list, observacao=""):
-    data = load_data()
-    
-    total_pizzas = sum(sab['quantidade'] for sab in sabores_list)
-    
-    nova_retirada = {
-        'id': len(data) + 1,
-        'dia': dia,
-        'nome': nome,
-        'total_pizzas': total_pizzas,
-        'sabores': sabores_list,
-        'observacao': observacao,
-        'data_hora': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def salvar_dados():
+    dados = {
+        'pedidos': st.session_state.pedidos,
+        'retiradas': st.session_state.retiradas
     }
-    
-    data.append(nova_retirada)
-    save_data(data)
-    return True
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(dados, f, ensure_ascii=False, indent=2)
 
-# Função para deletar retirada
-def delete_retirada(retirada_id):
-    data = load_data()
-    data = [r for r in data if r['id'] != retirada_id]
-    save_data(data)
+# Função para calcular total pedido por sabor e dia
+def calcular_pedido_sabor_dia(sabor, dia):
+    if sabor in st.session_state.pedidos and dia in st.session_state.pedidos[sabor]:
+        return st.session_state.pedidos[sabor][dia]
+    return 0
 
-# Título
-st.title("🍕 Sistema de Controle de Pizzas")
+# Função para calcular total entregue por sabor e dia
+def calcular_entregue_sabor_dia(sabor, dia):
+    total = 0
+    for retirada in st.session_state.retiradas:
+        if retirada['dia'] == dia and sabor in retirada['pizzas']:
+            total += retirada['pizzas'][sabor]
+    return total
 
-# Criar abas
+# Função para calcular estoque restante por sabor e dia
+def calcular_restante_sabor_dia(sabor, dia):
+    pedido = calcular_pedido_sabor_dia(sabor, dia)
+    entregue = calcular_entregue_sabor_dia(sabor, dia)
+    return pedido - entregue
+
+# Carregar dados ao iniciar
+carregar_dados()
+
+# CSS customizado para tema escuro
+st.markdown("""
+<style>
+    .stButton>button {
+        width: 100%;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 28px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Título principal
+st.title("🍕 Controle de Estoque - Pizzaria")
+
+# Abas
 tab1, tab2, tab3 = st.tabs(["📝 Cadastro", "📊 Relatório", "💾 Backup"])
 
-# ABA 1: CADASTRO
+# ABA 1: CADASTRO (Registrar Nova Retirada)
 with tab1:
     st.header("Registrar Nova Retirada")
     
-    # Inicializar session state para limpar o nome
-    if 'nome_input' not in st.session_state:
-        st.session_state.nome_input = ""
-    
-    if 'clear_trigger' not in st.session_state:
-        st.session_state.clear_trigger = 0
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        dia_selecionado = st.selectbox(
-            "Dia da Semana",
-            DIAS_SEMANA
-        )
-        
-    with col2:
-        nome_pessoa = st.text_input(
-            "Nome de Quem Retirou",
-            value=st.session_state.nome_input,
-            key=f"nome_{st.session_state.clear_trigger}",
-            placeholder="Digite o nome aqui..."
-        )
-    
-    # Campo de observação
-    observacao = st.text_area(
-        "Observações (opcional)",
-        placeholder="Alguma observação adicional...",
-        height=80,
-        key=f"obs_{st.session_state.clear_trigger}"
+    # Dia da Semana
+    st.markdown("**Dia da Semana**")
+    dia_selecionado = st.selectbox(
+        "Dia da Semana",
+        DIAS_SEMANA,
+        label_visibility="collapsed"
     )
     
-    st.divider()
+    # Nome de quem retirou
+    st.markdown("**Nome de Quem Retirou**")
+    nome_retirou = st.text_input(
+        "Nome de Quem Retirou",
+        placeholder="Digite o nome aqui...",
+        label_visibility="collapsed"
+    )
     
-    st.subheader("Sabores das Pizzas")
+    # Observações
+    st.markdown("**Observações (opcional)**")
+    observacoes = st.text_area(
+        "Observações",
+        placeholder="Alguma observação adicional...",
+        label_visibility="collapsed",
+        height=100
+    )
     
-    # Inicializar session state para as quantidades
-    if 'quantidades' not in st.session_state:
-        st.session_state.quantidades = {sabor: 0 for sabor in SABORES_DISPONIVEIS}
+    st.markdown("---")
     
-    # Interface para cada sabor
-    for sabor in SABORES_DISPONIVEIS:
+    # Sabores das Pizzas
+    st.markdown("### Sabores das Pizzas")
+    
+    # Inicializar contador de pizzas no session state
+    if 'contador_pizzas' not in st.session_state:
+        st.session_state.contador_pizzas = {sabor: 0 for sabor in SABORES}
+    
+    # Para cada sabor, mostrar botões + e -
+    for sabor in SABORES:
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         
         with col1:
-            st.write(f"**{sabor}**")
+            st.markdown(f"**{sabor}**")
         
         with col2:
-            if st.button("➖", key=f"minus_{sabor}"):
-                if st.session_state.quantidades[sabor] > 0:
-                    st.session_state.quantidades[sabor] -= 1
+            # Botão de diminuir
+            if st.button("➖", key=f"menos_{sabor}", use_container_width=True):
+                if st.session_state.contador_pizzas[sabor] > 0:
+                    st.session_state.contador_pizzas[sabor] -= 1
                     st.rerun()
         
         with col3:
-            st.write(f"**{st.session_state.quantidades[sabor]}**")
+            # Mostrar contador atual
+            st.markdown(f"<div style='text-align: center; font-size: 24px; font-weight: bold;'>{st.session_state.contador_pizzas[sabor]}</div>", unsafe_allow_html=True)
         
         with col4:
-            if st.button("➕", key=f"plus_{sabor}"):
-                st.session_state.quantidades[sabor] += 1
+            # Botão de aumentar
+            if st.button("➕", key=f"mais_{sabor}", use_container_width=True):
+                st.session_state.contador_pizzas[sabor] += 1
                 st.rerun()
     
-    st.divider()
+    st.markdown("---")
     
-    # Mostrar total
-    total_pizzas = sum(st.session_state.quantidades.values())
-    st.info(f"**Total de Pizzas:** {total_pizzas}")
+    # Total de pizzas
+    total_pizzas = sum(st.session_state.contador_pizzas.values())
+    st.info(f"**Total de Pizzas: {total_pizzas}**")
     
-    # Botões
-    col1, col2 = st.columns(2)
+    # Botões de ação
+    col1, col2 = st.columns([1, 2])
     
     with col1:
-        if st.button("🔄 Limpar", use_container_width=True):
-            st.session_state.quantidades = {sabor: 0 for sabor in SABORES_DISPONIVEIS}
-            st.session_state.nome_input = ""
-            st.session_state.clear_trigger += 1
+        if st.button("🗑️ Limpar", use_container_width=True):
+            st.session_state.contador_pizzas = {sabor: 0 for sabor in SABORES}
             st.rerun()
     
     with col2:
         if st.button("💾 Salvar Retirada", type="primary", use_container_width=True):
-            if not nome_pessoa:
-                st.error("❌ Por favor, preencha o nome de quem retirou!")
+            if not nome_retirou.strip():
+                st.error("❌ Por favor, informe o nome de quem retirou!")
             elif total_pizzas == 0:
-                st.error("❌ Por favor, selecione pelo menos uma pizza!")
+                st.error("❌ Adicione pelo menos uma pizza!")
             else:
-                # Criar lista de sabores com quantidade > 0
-                sabores_validos = [
-                    {'sabor': sabor, 'quantidade': qtd} 
-                    for sabor, qtd in st.session_state.quantidades.items() 
-                    if qtd > 0
-                ]
+                # Verificar se há excedentes
+                excedentes = []
+                for sabor, qtd in st.session_state.contador_pizzas.items():
+                    if qtd > 0:
+                        restante = calcular_restante_sabor_dia(sabor, dia_selecionado)
+                        if qtd > restante:
+                            excedentes.append({
+                                'sabor': sabor,
+                                'pedido': calcular_pedido_sabor_dia(sabor, dia_selecionado),
+                                'excedente': qtd - restante
+                            })
                 
-                if add_retirada(dia_selecionado, nome_pessoa, sabores_validos, observacao):
+                # Criar registro da retirada
+                retirada = {
+                    'id': len(st.session_state.retiradas) + 1,
+                    'data': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                    'dia': dia_selecionado,
+                    'nome': nome_retirou.strip(),
+                    'observacoes': observacoes.strip(),
+                    'pizzas': {sabor: qtd for sabor, qtd in st.session_state.contador_pizzas.items() if qtd > 0},
+                    'total': total_pizzas,
+                    'tem_excedente': len(excedentes) > 0,
+                    'excedentes': excedentes
+                }
+                
+                st.session_state.retiradas.append(retirada)
+                salvar_dados()
+                
+                # Limpar formulário
+                st.session_state.contador_pizzas = {sabor: 0 for sabor in SABORES}
+                
+                if len(excedentes) > 0:
+                    st.warning(f"⚠️ Retirada salva, mas ATENÇÃO: Foram detectados excedentes!")
+                    for exc in excedentes:
+                        st.error(f"🔴 **{exc['sabor']}**: Foram pedidas apenas {exc['pedido']} pizzas para {dia_selecionado}, mas você está entregando {exc['excedente']} a mais!")
+                else:
                     st.success("✅ Retirada registrada com sucesso!")
-                    # Limpar formulário
-                    st.session_state.quantidades = {sabor: 0 for sabor in SABORES_DISPONIVEIS}
-                    st.session_state.nome_input = ""
-                    st.session_state.clear_trigger += 1
-                    st.rerun()
+                
+                st.rerun()
 
 # ABA 2: RELATÓRIO
 with tab2:
-    st.header("Relatório de Retiradas")
+    st.header("📊 Relatório de Entregas")
     
-    data = load_data()
+    # Seção de configuração de pedidos
+    with st.expander("⚙️ Configurar Pedidos por Dia", expanded=not bool(st.session_state.pedidos)):
+        st.info("💡 Configure quantas pizzas de cada sabor foram pedidas para cada dia")
+        
+        for sabor in SABORES:
+            st.markdown(f"**🍕 {sabor}**")
+            cols = st.columns(3)
+            
+            for idx, dia in enumerate(DIAS_SEMANA):
+                with cols[idx]:
+                    valor_atual = calcular_pedido_sabor_dia(sabor, dia)
+                    novo_valor = st.number_input(
+                        dia,
+                        min_value=0,
+                        value=valor_atual,
+                        step=1,
+                        key=f"pedido_{sabor}_{dia}"
+                    )
+                    
+                    if novo_valor != valor_atual:
+                        if sabor not in st.session_state.pedidos:
+                            st.session_state.pedidos[sabor] = {}
+                        st.session_state.pedidos[sabor][dia] = novo_valor
+                        salvar_dados()
+            
+            st.markdown("---")
+        
+        # Mostrar total configurado
+        if st.session_state.pedidos:
+            total_config = sum(sum(dias.values()) for dias in st.session_state.pedidos.values())
+            st.success(f"**🍕 Total de pizzas pedidas: {total_config}**")
     
-    if not data:
-        st.info("📋 Nenhuma retirada registrada ainda.")
+    st.markdown("---")
+    
+    if not st.session_state.pedidos:
+        st.warning("⚠️ Configure os pedidos acima primeiro")
     else:
-        # Filtro por dia da semana
-        col1, col2, col3 = st.columns([2, 2, 1])
+        # Calcular totais gerais
+        total_pedido = sum(sum(dias.values()) for dias in st.session_state.pedidos.values())
+        total_entregue = sum(ret['total'] for ret in st.session_state.retiradas)
+        total_restante = total_pedido - total_entregue
         
+        # Métricas no topo
+        col1, col2, col3 = st.columns(3)
         with col1:
-            dias_disponiveis = ["Todos"] + sorted(list(set([r['dia'] for r in data])))
-            filtro_dia = st.selectbox("Filtrar por Dia da Semana", dias_disponiveis)
-        
+            st.metric("🍕 Total Pedido", f"{total_pedido} pizzas")
         with col2:
-            # Filtro por nome
-            nomes_disponiveis = ["Todos"] + sorted(list(set([r['nome'] for r in data])))
-            filtro_nome = st.selectbox("Filtrar por Nome", nomes_disponiveis)
+            st.metric("✅ Total Entregue", f"{total_entregue} pizzas")
+        with col3:
+            st.metric("📦 Restante", f"{total_restante} pizzas", 
+                     delta=f"{total_restante - total_pedido}" if total_restante != total_pedido else "0")
         
-        # Aplicar filtros
-        dados_filtrados = data
+        st.markdown("---")
         
-        if filtro_dia != "Todos":
-            dados_filtrados = [r for r in dados_filtrados if r['dia'] == filtro_dia]
-        
-        if filtro_nome != "Todos":
-            dados_filtrados = [r for r in dados_filtrados if r['nome'] == filtro_nome]
-        
-        # Ordenar por data mais recente
-        dados_filtrados = sorted(dados_filtrados, key=lambda x: x['data_hora'], reverse=True)
-        
-        st.divider()
-        
-        # Estatísticas
-        if dados_filtrados:
-            col1, col2, col3 = st.columns(3)
+        # Verificar retiradas com excedentes
+        retiradas_com_excedente = [r for r in st.session_state.retiradas if r.get('tem_excedente', False)]
+        if retiradas_com_excedente:
+            st.error(f"⚠️ **ALERTA:** {len(retiradas_com_excedente)} retirada(s) com excedente(s) detectada(s)!")
             
-            with col1:
-                total_retiradas = len(dados_filtrados)
-                st.metric("Total de Retiradas", total_retiradas)
+            total_excedente = sum(
+                sum(exc['excedente'] for exc in ret['excedentes'])
+                for ret in retiradas_com_excedente
+            )
+            st.warning(f"📊 Total de pizzas entregues além do pedido: **{total_excedente} pizzas**")
+        
+        st.markdown("---")
+        
+        # Estoque por Sabor e Dia
+        st.subheader("📋 Estoque por Sabor e Dia")
+        
+        for sabor in SABORES:
+            with st.expander(f"🍕 {sabor}", expanded=True):
+                cols = st.columns(3)
+                
+                for idx, dia in enumerate(DIAS_SEMANA):
+                    with cols[idx]:
+                        pedido = calcular_pedido_sabor_dia(sabor, dia)
+                        entregue = calcular_entregue_sabor_dia(sabor, dia)
+                        restante = pedido - entregue
+                        
+                        st.markdown(f"**{dia}**")
+                        
+                        # Cores baseadas no estoque
+                        if restante < 0:
+                            st.markdown(f"🔴 **{restante}** / {pedido}")
+                            st.caption(f"⚠️ Excedente: {abs(restante)}")
+                        elif restante == 0 and pedido > 0:
+                            st.markdown(f"🔴 {restante} / {pedido}")
+                            st.caption("Esgotado")
+                        elif restante < pedido * 0.2 and pedido > 0:
+                            st.markdown(f"🟡 {restante} / {pedido}")
+                            st.caption("Estoque baixo")
+                        elif pedido > 0:
+                            st.markdown(f"🟢 {restante} / {pedido}")
+                        else:
+                            st.markdown(f"⚪ Não pedido")
+        
+        st.markdown("---")
+        
+        # Lista de Retiradas
+        st.subheader("📜 Histórico de Retiradas")
+        
+        if st.session_state.retiradas:
+            st.info(f"**Total de retiradas: {len(st.session_state.retiradas)}**")
             
-            with col2:
-                total_pizzas = sum(r['total_pizzas'] for r in dados_filtrados)
-                st.metric("Total de Pizzas", total_pizzas)
-            
-            with col3:
-                pessoas_unicas = len(set([r['nome'] for r in dados_filtrados]))
-                st.metric("Pessoas Diferentes", pessoas_unicas)
-            
-            st.divider()
-            
-            # Exibir retiradas
-            for retirada in dados_filtrados:
-                with st.container():
-                    col1, col2 = st.columns([5, 1])
+            for retirada in reversed(st.session_state.retiradas):
+                with st.expander(
+                    f"#{retirada['id']} - {retirada['nome']} ({retirada['dia']}) - {retirada['total']} pizzas - {retirada['data']}"
+                    + (" 🔴 EXCEDENTE" if retirada.get('tem_excedente', False) else "")
+                ):
+                    col1, col2 = st.columns([2, 1])
                     
                     with col1:
-                        st.subheader(f"{retirada['nome']} - {retirada['dia']}")
-                        st.write(f"**Total de Pizzas retiradas:** {retirada['total_pizzas']}")
-                        
-                        sabores_texto = ", ".join([
-                            f"{s['quantidade']} x {s['sabor']}" 
-                            for s in retirada['sabores']
-                        ])
-                        st.write(f"**Sabores:** {sabores_texto}")
-                        
-                        # Mostrar observação se existir
-                        if retirada.get('observacao'):
-                            st.write(f"**Observação:** {retirada['observacao']}")
-                        
-                        st.caption(f"Registrado em: {retirada['data_hora']}")
+                        st.markdown(f"**Nome:** {retirada['nome']}")
+                        st.markdown(f"**Dia:** {retirada['dia']}")
+                        st.markdown(f"**Data:** {retirada['data']}")
+                        if retirada.get('observacoes'):
+                            st.markdown(f"**Obs:** {retirada['observacoes']}")
                     
                     with col2:
-                        if st.button("🗑️ Deletar", key=f"delete_{retirada['id']}"):
-                            delete_retirada(retirada['id'])
-                            st.rerun()
+                        st.markdown(f"**Total:** {retirada['total']} pizzas")
                     
-                    st.divider()
-            
-            # Botão para exportar
-            if st.button("📥 Exportar para CSV"):
-                # Criar DataFrame para exportar
-                export_data = []
-                for r in dados_filtrados:
-                    sabores_str = ", ".join([f"{s['quantidade']}x {s['sabor']}" for s in r['sabores']])
-                    export_data.append({
-                        'Nome': r['nome'],
-                        'Dia': r['dia'],
-                        'Total Pizzas': r['total_pizzas'],
-                        'Sabores': sabores_str,
-                        'Observação': r.get('observacao', ''),
-                        'Data/Hora': r['data_hora']
-                    })
-                
-                df = pd.DataFrame(export_data)
-                csv = df.to_csv(index=False, encoding='utf-8-sig')
-                
-                st.download_button(
-                    label="⬇️ Baixar CSV",
-                    data=csv,
-                    file_name=f"relatorio_pizzas_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
+                    st.markdown("**Pizzas retiradas:**")
+                    for sabor, qtd in retirada['pizzas'].items():
+                        st.text(f"• {sabor}: {qtd}")
+                    
+                    # Mostrar excedentes se houver
+                    if retirada.get('tem_excedente', False):
+                        st.markdown("---")
+                        st.error("⚠️ **EXCEDENTES DETECTADOS:**")
+                        for exc in retirada['excedentes']:
+                            st.markdown(f"🔴 **{exc['sabor']}**: {exc['excedente']} pizzas a mais (pedido: {exc['pedido']})")
+                    
+                    # Botão de apagar registro
+                    st.markdown("---")
+                    if st.button(f"🗑️ Apagar Registro #{retirada['id']}", key=f"del_ret_{retirada['id']}", type="secondary", use_container_width=True):
+                        st.session_state.retiradas = [r for r in st.session_state.retiradas if r['id'] != retirada['id']]
+                        salvar_dados()
+                        st.success(f"✅ Registro #{retirada['id']} apagado!")
+                        st.rerun()
         else:
-            st.warning("Nenhuma retirada encontrada com os filtros selecionados.")
+            st.info("Nenhuma retirada registrada ainda.")
 
 # ABA 3: BACKUP
 with tab3:
-    st.header("💾 Backup e Importação de Dados")
+    st.header("💾 Backup e Restauração")
     
-    st.write("Use esta seção para fazer backup dos seus dados ou restaurar de um backup anterior.")
+    st.markdown("### 📥 Exportar Dados")
+    st.info("Faça backup dos seus dados!")
     
-    st.divider()
-    
-    # SEÇÃO DE BACKUP (DOWNLOAD)
-    st.subheader("📥 Fazer Backup")
-    st.write("Baixe o arquivo de dados para fazer backup em seu computador.")
-    
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            json_data = f.read()
+    if st.session_state.pedidos or st.session_state.retiradas:
+        dados_backup = {
+            'pedidos': st.session_state.pedidos,
+            'retiradas': st.session_state.retiradas,
+            'data_backup': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        }
         
-        data_atual = load_data()
-        total_registros = len(data_atual)
+        json_str = json.dumps(dados_backup, ensure_ascii=False, indent=2)
         
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.info(f"📊 **Total de registros no sistema:** {total_registros}")
-        
-        with col2:
-            st.download_button(
-                label="⬇️ Baixar Backup (JSON)",
-                data=json_data,
-                file_name=f"backup_pizzas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
+        st.download_button(
+            label="📥 Baixar Backup (JSON)",
+            data=json_str,
+            file_name=f"backup_pizzaria_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
     else:
-        st.warning("⚠️ Nenhum arquivo de dados encontrado. Registre algumas retiradas primeiro.")
+        st.warning("Nenhum dado para exportar.")
     
-    st.divider()
+    st.markdown("---")
     
-    # SEÇÃO DE IMPORTAÇÃO (UPLOAD)
-    st.subheader("📤 Importar Backup")
-    st.write("Restaure seus dados a partir de um arquivo de backup.")
+    st.markdown("### 📤 Importar Dados")
+    st.info("Restaure um backup anterior")
     
-    st.warning("⚠️ **ATENÇÃO:** Importar um backup irá **SUBSTITUIR** todos os dados atuais!")
+    uploaded_file = st.file_uploader("Selecione o arquivo (.json)", type=['json'])
     
-    uploaded_file = st.file_uploader(
-        "Escolha o arquivo de backup (JSON)",
-        type=['json'],
-        key="backup_uploader"
-    )
-    
-    if uploaded_file is not None:
+    if uploaded_file:
         try:
-            # Ler o arquivo enviado
-            imported_data = json.loads(uploaded_file.read().decode('utf-8'))
+            dados_importados = json.load(uploaded_file)
             
-            # Validar estrutura básica
-            if isinstance(imported_data, list):
-                st.success(f"✅ Arquivo válido! Encontrados **{len(imported_data)}** registros.")
+            if 'pedidos' in dados_importados or 'retiradas' in dados_importados:
+                st.success("✅ Arquivo válido!")
                 
-                # Mostrar preview dos dados
-                with st.expander("👁️ Visualizar dados do backup"):
-                    if len(imported_data) > 0:
-                        for i, reg in enumerate(imported_data[:5]):  # Mostrar apenas os 5 primeiros
-                            st.write(f"**{i+1}.** {reg.get('nome', 'N/A')} - {reg.get('dia', 'N/A')} - {reg.get('total_pizzas', 0)} pizzas")
-                        if len(imported_data) > 5:
-                            st.write(f"... e mais {len(imported_data) - 5} registros")
-                    else:
-                        st.write("Arquivo vazio (sem registros)")
+                with st.expander("👁️ Preview"):
+                    st.json(dados_importados)
                 
-                st.divider()
-                
-                # Confirmação para importar
-                col1, col2, col3 = st.columns([1, 1, 1])
-                
-                with col2:
-                    if st.button("🔄 CONFIRMAR IMPORTAÇÃO", type="primary", use_container_width=True):
-                        # Fazer backup do arquivo atual antes de substituir
-                        if os.path.exists(DATA_FILE):
-                            backup_name = f"backup_automatico_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                                backup_data = f.read()
-                            # Salvar backup automático (opcional, mas seguro)
-                            # com open(backup_name, 'w', encoding='utf-8') as f:
-                            #     f.write(backup_data)
-                        
-                        # Salvar os dados importados
-                        save_data(imported_data)
-                        st.success("✅ **Dados importados com sucesso!**")
-                        st.info("♻️ Recarregue a página para ver os dados atualizados.")
-                        st.balloons()
+                if st.button("✅ Confirmar Importação", type="primary", use_container_width=True):
+                    st.session_state.pedidos = dados_importados.get('pedidos', {})
+                    st.session_state.retiradas = dados_importados.get('retiradas', [])
+                    salvar_dados()
+                    st.success("✅ Dados importados!")
+                    st.rerun()
             else:
-                st.error("❌ Arquivo inválido! O backup deve conter uma lista de registros.")
-        
-        except json.JSONDecodeError:
-            st.error("❌ Erro ao ler o arquivo! Certifique-se de que é um arquivo JSON válido.")
+                st.error("❌ Arquivo inválido!")
         except Exception as e:
-            st.error(f"❌ Erro ao processar arquivo: {str(e)}")
+            st.error(f"❌ Erro: {str(e)}")
     
-    st.divider()
+    st.markdown("---")
     
-    # SEÇÃO DE LIMPEZA DE DADOS
-    st.subheader("🗑️ Limpar Todos os Dados")
-    st.write("**CUIDADO:** Esta ação irá apagar **TODOS** os registros permanentemente!")
-    
-    if st.checkbox("🔓 Habilitar botão de limpeza"):
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("🗑️ APAGAR TUDO", type="secondary", use_container_width=True):
-                if os.path.exists(DATA_FILE):
-                    # Fazer backup antes de apagar
-                    backup_name = f"backup_antes_limpar_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                        backup_data = f.read()
-                    st.download_button(
-                        label="⬇️ Salvar backup antes de apagar",
-                        data=backup_data,
-                        file_name=backup_name,
-                        mime="application/json"
-                    )
-                
-                # Apagar dados
-                save_data([])
-                st.success("✅ Todos os dados foram apagados!")
-                st.rerun()
+    # Limpar tudo
+    if st.button("🗑️ Limpar Todos os Dados", type="secondary", use_container_width=True):
+        st.session_state.pedidos = {}
+        st.session_state.retiradas = []
+        if DATA_FILE.exists():
+            DATA_FILE.unlink()
+        st.success("✅ Todos os dados foram limpos!")
+        st.rerun()
 
 # Rodapé
-st.divider()
-st.caption("🍕 Sistema de Controle de Pizzas - Desenvolvido com Streamlit")
+st.markdown("---")
+st.caption("🍕 Sistema de Controle de Pizzaria | Sabores: Calabresa, Mussarela, Frango, Americana")

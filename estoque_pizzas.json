@@ -1,0 +1,25 @@
+{
+  "pedidos": {
+    "Mussarela": {
+      "Segunda-Feira": 31,
+      "Terça-Feira": 17,
+      "Quarta-Feira": 44
+    },
+    "Frango": {
+      "Segunda-Feira": 59,
+      "Terça-Feira": 17,
+      "Quarta-Feira": 34
+    },
+    "Calabresa": {
+      "Segunda-Feira": 72,
+      "Terça-Feira": 26,
+      "Quarta-Feira": 50
+    },
+    "Americana": {
+      "Segunda-Feira": 38,
+      "Terça-Feira": 27,
+      "Quarta-Feira": 38
+    }
+  },
+  "retiradas": []
+}
